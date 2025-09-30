@@ -1,72 +1,112 @@
-/* While this template provides a good starting point for using Wear Compose, you can always
- * take a look at https://github.com/android/wear-os-samples/tree/main/ComposeStarter to find the
- * most up to date changes to the libraries and their usages.
- */
-
 package com.example.gesturelogger.presentation
 
+import android.util.Log
+
+import android.app.Activity
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.TimeText
-import androidx.wear.tooling.preview.devices.WearDevices
+import android.widget.Button
+import android.widget.EditText
 import com.example.gesturelogger.R
-import com.example.gesturelogger.presentation.theme.GestureLoggerTheme
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.*
 
-class MainActivity : ComponentActivity() {
+class MainActivity : Activity(), SensorEventListener {
+
+    private lateinit var sensorManager: SensorManager
+    private var accel: Sensor? = null
+    private var gyro: Sensor? = null
+    private var isRecording = false
+    private var outputStream: FileOutputStream? = null
+
+    // Store latest readings
+    private var lastAccel = FloatArray(3) { 0f }
+    private var lastGyro = FloatArray(3) { 0f }
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
-
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        setTheme(android.R.style.Theme_DeviceDefault)
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
-        setContent {
-            WearApp("Android")
+        val gestureLabel = findViewById<EditText>(R.id.gestureLabel)
+        val startBtn = findViewById<Button>(R.id.startButton)
+        val stopBtn = findViewById<Button>(R.id.stopButton)
+
+        startBtn.setOnClickListener {
+            val label = gestureLabel.text.toString().ifEmpty { "unknown" }
+            updateButtonColors(startBtn, true)
+            startRecording(label)
+        }
+
+        stopBtn.setOnClickListener {
+            stopRecording()
+            updateButtonColors(startBtn, false)
         }
     }
-}
 
-@Composable
-fun WearApp(greetingName: String) {
-    GestureLoggerTheme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colors.background),
-            contentAlignment = Alignment.Center
-        ) {
-            TimeText()
-            Greeting(greetingName = greetingName)
+    private fun updateButtonColors(btn: Button, isRecording: Boolean) {
+        if (isRecording) {
+            btn.setBackgroundColor(getColor(R.color.recordingRed))
+        } else {
+            btn.setBackgroundColor(getColor(R.color.defaultButton))
         }
     }
-}
 
-@Composable
-fun Greeting(greetingName: String) {
-    Text(
-        modifier = Modifier.fillMaxWidth(),
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colors.primary,
-        text = stringResource(R.string.hello_world, greetingName)
-    )
-}
+    private fun startRecording(label: String) {
+        if (isRecording) return
+        isRecording = true
 
-@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
-@Composable
-fun DefaultPreview() {
-    WearApp("Preview Android")
+        val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+        val fileName = "${label}_${sdf.format(Date())}.csv"
+        val file = File(getExternalFilesDir(null), fileName)
+        outputStream = FileOutputStream(file)
+
+        // File path /storage/emulated/0/Android/data/com.example.gesturelogger/files
+        Log.d("GestureLogger", "Writing CSV to: ${file.absolutePath}")
+
+
+        // Write CSV header
+        outputStream?.write("timestamp,ax,ay,az,gx,gy,gz,label\n".toByteArray())
+
+        sensorManager.registerListener(this, accel, 10000)
+        sensorManager.registerListener(this, gyro, 10000)
+    }
+
+    private fun stopRecording() {
+        if (!isRecording) return
+        isRecording = false
+
+        sensorManager.unregisterListener(this)
+        outputStream?.close()
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (!isRecording || event == null) return
+
+        val ts = System.currentTimeMillis()
+        val label = findViewById<EditText>(R.id.gestureLabel).text.toString().ifEmpty { "unknown" }
+
+        when (event.sensor.type) {
+            Sensor.TYPE_ACCELEROMETER -> lastAccel = event.values.clone()
+            Sensor.TYPE_GYROSCOPE -> lastGyro = event.values.clone()
+        }
+
+        // Write a row combining latest accel + gyro
+        val line = "$ts," +
+                "${lastAccel[0]},${lastAccel[1]},${lastAccel[2]}," +
+                "${lastGyro[0]},${lastGyro[1]},${lastGyro[2]}," +
+                "$label\n"
+
+        outputStream?.write(line.toByteArray())
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }

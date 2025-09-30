@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="recordingRed">#FF3B30</color> <!-- iOS-style red -->
+    <color name="defaultButton">#DEDEDE</color> <!-- default Material button color -->
+</resources>
